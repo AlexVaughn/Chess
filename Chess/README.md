@@ -1,0 +1,1 @@
+Dataset used to train AI found at https://www.kaggle.com/datasets/milesh1/35-million-chess-games/code?resource=download
