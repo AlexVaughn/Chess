@@ -1,6 +1,6 @@
 Game
 - Assets folder containing image files are not on github to avoid using too much memory  
-- Playable over a local network and over the internet when provided with an open port  
+- Playable over a local network and over the internet when provided with an open port (TCP)  
 - Playable vs an AI trained on pro-level games using a Deep Q-Learning model  
   
 AI  
