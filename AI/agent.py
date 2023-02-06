@@ -411,23 +411,6 @@ class Agent:
                 state_last = None
 
 
-
-
-
-
-
-    # def train_long(self):
-
-    #     if len(self.memory) > BATCH_SIZE:
-    #         mini_sample = random.sample(self.memory, BATCH_SIZE)
-    #     else:
-    #         mini_sample = self.memory
-
-    #     for i in mini_sample:
-    #         self.trainer.train_step(*i)
-
-
-
 class TrainController:
 
     def __init__(self) -> None:
