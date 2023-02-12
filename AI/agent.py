@@ -23,7 +23,7 @@ class TrainingState:
         display.display(plt.gcf())
         plt.clf()
         plt.title('Training...')
-        plt.xlabel('Number of Games')
+        plt.xlabel('Number of Games * 100')
         plt.ylabel('Loss')
         plt.plot(self.losses, label="loss")
         plt.legend()
@@ -196,11 +196,7 @@ class Agent:
         A generator that reads a data file of moves, yields the moves tensor that
         matches the output layer of the model, the piece to be moved, row to move,
         column to move, the reward, and if game is done.
-
-        Black will perform move here automatically
-        White's move needs to be performed outside of this function call
         '''
-
         with open(self.data_file, "r") as file:
             next(file)  #skip header
             
@@ -213,49 +209,33 @@ class Agent:
                 game_moves = i.split(",")
                 result = game_moves[0]
                 game_moves = game_moves[1:]
+                done = 0
                 
                 #Loop through each move in a game
-                done = 0
-                last_is_white = game_moves[-1][0] == "W"
                 for m in enumerate(game_moves):
-
-                    self.training_state.recent_moves.append(m[1])
+                    self.training_state.recent_moves.append(m[1])  #For debugging
 
                     #Determine if this is the last move
-                    if ((last_is_white and m[0] == len(game_moves)-1)
-                    or (not last_is_white and m[0] == len(game_moves)-2)):
+                    if m[0] == len(game_moves)-1:
                         done = 1
                     
-                    #Perform blacks move
-                    if m[0] % 2 == 1:
-                        try: piece_index, piece, row, column, reward = self.interpret_move(m[1])
-                        except:
-                            yield None, None, 0, 0, 0, -1
-                            break
-                        self.send_move(piece, (row, column))
+                    #Interpret chess notation, if bad data, break loop to go to next game
+                    try:
+                        moves, piece, row, column, reward = self.interpret_move(m[1])
+                    except:
+                        yield None, None, 0, 0, 0, -1
+                        break
+ 
+                    #Change reward if game is over
+                    if done:
+                        if result == "W": reward = 1
+                        elif result == "B": reward = -1
+                        else: reward = 0
 
-                    #Yield white's move
-                    else:
-                        try: piece_index, piece, row, column, reward = self.interpret_move(m[1])
-                        except:
-                            yield None, None, 0, 0, 0, -1
-                            break
-                        move_index = piece_index*64 + row*8 + column
-                        moves = torch.zeros(1024, dtype=torch.float).to(self.device)
-                        moves[move_index] = 1
+                    yield moves, piece, row, column, reward, done
                         
-                        #Change result if game is over
-                        if done:
-                            if result == "W": reward = 1
-                            elif result == "B": reward = -1
-                            else: reward = 0
 
-                        yield moves, piece, row, column, reward, done
-                        
-                    if done: break
-
-
-    def interpret_move(self, move) -> "Piece, int, int, int, float":
+    def interpret_move(self, move) -> "torch.Tensor, Piece, int, int, float":
         '''
         King = K, Queen = Q, Bishop = B, Knight = N, Rook = R, Pawn = no notation.
         Capturing an enemy piece sees an "x" placed between the piece moved and the square the captured piece was upon.
@@ -273,24 +253,26 @@ class Agent:
             "P": Pawn
         }
         color = BLACK if move[0] == "B" else WHITE
-        reward = 0.0
         move = move.strip().split(".")[1]
+        piece_captured = False
+        enemy_in_check = False
         
-        #handle pawn upgrade
+        #Handle pawn upgrade
         if "=" in move:
             self.upgrade_type = piece_dict[move[-1]]
             move = move[:-2]
 
-        #Calc reward
+        #Mark capture a piece
         if "x" in move:
-            reward += 0.1
+            piece_captured = True
             move = move.replace("x", "")
 
+        #Mark enemy king in check
         if "+" in move:
-            reward += 0.1
+            enemy_in_check = True
             move = move.replace("+", "")
 
-        #handle castling moves
+        #Handle castling moves
         if move[0] == "O":
             if color == BLACK:
                 piece = self.game_model.black_king
@@ -303,33 +285,47 @@ class Agent:
             
             if move == "O-O": column = 7
             elif move == "O-O-O": column = 0
-            
-            return piece_index, piece, row, column, reward
 
-        #change chess notation (row, column) to match game models indecies
-        loc = move[-2:]
-        move = move[:-2]
-        row = -int(loc[1]) + 8 
-        column = ord(loc[0]) - 97
-
-        #Get piece type
-        if len(move) > 0 and move[0].isupper():
-            piece_type = piece_dict[move[0]]
-            move = move[1:]
+        #Handle regular move
         else:
-            piece_type = piece_dict["P"]
 
-        #Get possible identifier to remove move ambiguity
-        if len(move) > 0:
-            try: identifier = (1, -int(move[0]) + 8)     #row = 1
-            except: identifier = (2, ord(move[0]) - 97)  #column = 2
-            move = move[1:]
-        else: identifier = (0, 0)                        #none = 0
+            #Change chess notation (row, column) to match game models indecies
+            loc = move[-2:]
+            move = move[:-2]
+            row = -int(loc[1]) + 8
+            column = ord(loc[0]) - 97
 
-        assert len(move) == 0
-        piece_index, piece = self.get_piece_by_location(color, piece_type, (row, column), identifier)
+            #Get piece type
+            if len(move) > 0 and move[0].isupper():
+                piece_type = piece_dict[move[0]]
+                move = move[1:]
+            else:
+                piece_type = piece_dict["P"]
 
-        return piece_index, piece, row, column, reward
+            #Get possible identifier to remove move ambiguity
+            if len(move) > 0:
+                try: identifier = (1, -int(move[0]) + 8)     #row = 1
+                except: identifier = (2, ord(move[0]) - 97)  #column = 2
+                move = move[1:]
+            else: identifier = (0, 0)                        #none = 0
+
+            assert len(move) == 0
+        
+            #Get the piece object and the index the piece is located at in the colors list of pieces
+            piece_index, piece = self.get_piece_by_location(color, piece_type, (row, column), identifier)
+
+
+        #Create move tensor to match the output layer of the model
+        if color == WHITE:
+            move_index = piece_index*64 + row*8 + column
+            moves = torch.zeros(1024, dtype=torch.float).to(self.device)
+            moves[move_index] = 1
+        else:
+            moves = None
+
+        reward = self.calc_move_reward(piece_captured, enemy_in_check, (row, column))
+
+        return moves, piece, row, column, reward
         
         
     def get_piece_by_location(self, color, piece_type, loc, identifier) -> "int, Piece":
@@ -356,6 +352,30 @@ class Agent:
         assert len(pieces) == 1  #There is ambiguity if this is > 1
         
         return pieces[0]
+
+
+    def calc_move_reward(self, piece_captured, enemy_in_check, loc) -> float:
+        '''
+        Determine reward for putting the enemy king in check and/or
+        which piece type is being captured, return the appropriate reward
+        '''
+        capture = {
+            Queen: 0.3,
+            Bishop: 0.2,
+            Knight: 0.2,
+            Rook: 0.2,
+            Pawn: 0.1
+        }
+        reward = 0
+        
+        if piece_captured:
+            piece = self.game_model.get_piece(loc)
+            reward += capture[type(piece)]
+        
+        if enemy_in_check:
+            reward += 0.1
+        
+        return reward
 
 
     def include_castling_if(self, piece, loc) -> "int, int":
@@ -388,22 +408,70 @@ class Agent:
 
 
     def train(self):
-
+        '''
+        White is the models playing color. Get whites move and blacks responding
+        move. The start state will be before white makes its move and the end state
+        is after black makes its move in response. This way the model may learn the 
+        consequences of its actions. The environment that white is in includes black
+        moving, which is essentially the environments reaction to any action white
+        makes. It is not solely, for example, a pawn being at a new location because
+        white moved it.
+        '''
         self.new_game()
         state_last = None
-        for moves, piece, row, column, reward, done in self.get_action_from_data():
-            self.training_state.move_count += 1
+        data = self.get_action_from_data()
 
-            if done == -1:
+        while True:
+            done = 0
+
+            #Get start state
+            if state_last is None:
+                state_last = self.get_state()
+
+            #Get white's move
+            try:
+                moves_w, piece_w, row_w, column_w, reward_w, done_w = next(data)
+                self.training_state.move_count += 1
+            except StopIteration: break
+
+            #Handle bad data
+            if done_w == -1:
                 print(f"Bad data detected, skipping the rest of game {self.training_state.n_games}")
                 self.new_game()
                 state_last = None
                 continue
 
-            if state_last is None: state_last = self.get_state()
-            self.send_move(piece, (row, column))
+            #Perform white move
+            self.send_move(piece_w, (row_w, column_w))
+        
+            #Get black's move
+            if not done_w:
+                try:
+                    if done_w != -1:
+                        moves_b, piece_b, row_b, column_b, reward_b, done_b = next(data)
+                except StopIteration: break
+
+            #Handle bad data
+            if done_b == -1:
+                print(f"Bad data detected, skipping the rest of game {self.training_state.n_games}")
+                self.new_game()
+                state_last = None
+                continue
+
+            #Perform black move
+            if not done_w:
+                self.send_move(piece_b, (row_b, column_b))
+
+            if done_w or done_b:
+                done = 1
+
+            #If black got a reward, that is bad for white, set whites reward to the negative of blacks reward
+            if not done and reward_b > 0:
+                reward_w = -reward_b
+            
+            #Train step
             state_new = self.get_state()
-            self.training_state.game_loss += self.trainer.train_step(state_last, state_new, moves, reward, done)
+            self.training_state.game_loss += self.trainer.train_step(state_last, state_new, moves_w, reward_w, done)
             state_last = state_new
 
             if done:
