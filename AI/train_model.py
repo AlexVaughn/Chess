@@ -1,4 +1,4 @@
-import torch
+import torch, os
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
@@ -20,26 +20,35 @@ class Linear_QNet(nn.Module):
         torch.save(self.state_dict(), self.model_file)
 
     def load(self):
-        self.load_state_dict(torch.load(self.model_file))
-
+        if os.path.exists(self.model_file):
+            self.load_state_dict(torch.load(self.model_file))
+            print("Model Loaded.")
+        else:
+            print("Did not load model")
+        
 
 class QTrainer:
     '''
     Uses bellman equation to calculate new Q values
     '''
-    def __init__(self, model):
+    def __init__(self, model, is_training):
         self.model = model
         self.lr = 0.00001
         self.gamma = 0.9    #discount rate
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
+        
+        if is_training and torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
+        else:
+            self.device = torch.device("cpu")
+        self.model.to(self.device)
 
 
     def train_step(self, state_last, state_new, action, reward, done):
 
-        state_last = state_last.clone().detach()
-        state_new = state_new.clone().detach()
-        action = action.clone().detach()
+        state_last = state_last.to(self.device)
+        state_new = state_new.to(self.device)
         reward = torch.tensor(reward, dtype=torch.float)
 
         if len(state_last.shape) == 1:   # (1, x)

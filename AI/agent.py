@@ -1,108 +1,18 @@
-import torch, os, sys, pickle
-from AI.train_model import Linear_QNet, QTrainer
 from Game.model import *
-from Game.constants import *
-from collections import deque
-import matplotlib.pyplot as plt
-from IPython import display
-
-class TrainingState:
-    
-    def __init__(self):
-        self.n_games = 0
-        self.recent_moves = deque(maxlen=100)
-        self.move_count = 0
-        self.game_loss = 0
-        self.loss = 0
-        self.losses = []
-
-    def plot(self):
-        plt.ion()
-        sys.stdout = open(os.devnull, 'w')  #disable printing to console
-        display.clear_output(wait=True)
-        display.display(plt.gcf())
-        plt.clf()
-        plt.title('Training...')
-        plt.xlabel('Number of Games * 100')
-        plt.ylabel('Loss')
-        plt.plot(self.losses, label="loss")
-        plt.legend()
-        plt.ylim(ymin=0)
-        plt.text(len(self.losses)-1, self.losses[-1], str(self.losses[-1]))
-        plt.show(block=False)
-        plt.pause(.01)
-        sys.stdout = sys.__stdout__ #enable printing to console
-
+from AI.train_model import Linear_QNet, QTrainer
+import torch
 
 class Agent:
 
-    def __init__(self, game_model, is_training=False):
+    def __init__(self, game_model, data_extract=False, is_training=False):
         self.game_model = game_model
-        self.is_training = is_training
-        self.upgrade_type = None
-        self.data_file = "AI\\chess_moves.txt"
         self.model_file = "AI\\ai_model.pt"
-        self.training_state_file = "AI\\training_state.pickle"
-        self.training_state = TrainingState()
-        self.model = Linear_QNet(self.model_file, 4288, 8576, 1024)  #input_size, hidden_layer_size, possible_moves
-        self.trainer = QTrainer(self.model)
-
-        if torch.cuda.is_available(): self.device = torch.device("cuda:0")
-        else: self.device = torch.device("cpu")
+        self.upgrade_type = None    #for pawn upgrade
         
-        self.load_state()
-        self.model.to(self.device)
-
-
-    def save_state(self):
-
-        self.model.save()
-        print("Saved Model")
-
-        with open(self.training_state_file, 'wb') as file:
-            pickle.dump(self.training_state, file, protocol=pickle.HIGHEST_PROTOCOL)
-        print("Saved Training state object")
-
-
-    def load_state(self):
-
-        if os.path.exists(self.model_file):
-            self.model.load()
-            print("Model Loaded.")
-        else:
-            print("Did not load model")
-
-        if self.is_training and os.path.exists(self.training_state_file):
-            with open(self.training_state_file, 'rb') as file:
-                self.training_state = pickle.load(file)
-            print("Training state object loaded")
-        else:
-            print("Did not load training state object")
-
-
-    def new_game(self):
-        '''
-        Start a new game, reset model board
-        '''
-        self.game_model.new_game()
+        if not data_extract:
+            self.model = Linear_QNet(self.model_file, 4288, 8576, 1024) #input_size, hidden_layer_size, possible_moves
+            self.trainer = QTrainer(self.model, is_training)
         
-        if self.training_state.move_count != 0:
-            self.training_state.loss += self.training_state.game_loss / self.training_state.move_count
-        self.training_state.game_loss = 0
-        self.training_state.move_count = 0
-        
-        if self.training_state.n_games % 100 == 0:
-            print(f"Game {self.training_state.n_games}")
-            if self.training_state.loss != 0:
-                self.training_state.loss /= 100
-                self.training_state.losses.append(self.training_state.loss)
-                self.training_state.loss = 0
-                self.training_state.plot()
-            
-            self.save_state()
-        
-        self.training_state.n_games += 1
-
 
     def get_state(self) -> torch.Tensor:
         '''
@@ -118,8 +28,7 @@ class Agent:
         for piece in self.game_model.black_pieces + self.game_model.white_pieces:
             state += self.get_piece_view(piece)
             state += self.get_piece_type_hot(piece)
-
-        return torch.tensor(state, dtype=torch.float).to(self.device)
+        return torch.tensor(state, dtype=torch.float)
 
 
     def get_piece_view(self, piece) -> list:
@@ -191,48 +100,38 @@ class Agent:
             prediction[move_index] = float("-inf")
 
 
-    def get_action_from_data(self) -> "torch.Tensor, Piece, int, int, float, int":
+    def get_action_from_data(self, game) -> "torch.Tensor, Piece, int, int, float, int":
         '''
-        A generator that reads a data file of moves, yields the moves tensor that
+        Receives a string of moves from 1 game, yields the moves tensor that
         matches the output layer of the model, the piece to be moved, row to move,
         column to move, the reward, and if game is done.
         '''
-        with open(self.data_file, "r") as file:
-            next(file)  #skip header
+        game_moves = game.split(",")
+        result = game_moves[0]
+        game_moves = game_moves[1:]
+        done = 0
+        
+        #Loop through each move in a game
+        for m in enumerate(game_moves):
+
+            #Determine if this is the last move
+            if m[0] == len(game_moves)-1:
+                done = 1
             
-            #skip ahead to n_games if a model was loaded to resume training
-            for i in range(self.training_state.n_games):
-                next(file)
+            #Interpret chess notation, if bad data, break loop to go to next game
+            try:
+                moves, piece, row, column, reward = self.interpret_move(m[1])
+            except:
+                yield None, None, 0, 0, 0, -1
+                break
 
-            #Loop through each game (each line)
-            for i in file.readlines():
-                game_moves = i.split(",")
-                result = game_moves[0]
-                game_moves = game_moves[1:]
-                done = 0
-                
-                #Loop through each move in a game
-                for m in enumerate(game_moves):
-                    self.training_state.recent_moves.append(m[1])  #For debugging
+            #Change reward if game is over
+            if done:
+                if result == "W": reward = 1
+                elif result == "B": reward = -1
+                else: reward = 0
 
-                    #Determine if this is the last move
-                    if m[0] == len(game_moves)-1:
-                        done = 1
-                    
-                    #Interpret chess notation, if bad data, break loop to go to next game
-                    try:
-                        moves, piece, row, column, reward = self.interpret_move(m[1])
-                    except:
-                        yield None, None, 0, 0, 0, -1
-                        break
- 
-                    #Change reward if game is over
-                    if done:
-                        if result == "W": reward = 1
-                        elif result == "B": reward = -1
-                        else: reward = 0
-
-                    yield moves, piece, row, column, reward, done
+            yield moves, piece, row, column, reward, done
                         
 
     def interpret_move(self, move) -> "torch.Tensor, Piece, int, int, float":
@@ -318,7 +217,7 @@ class Agent:
         #Create move tensor to match the output layer of the model
         if color == WHITE:
             move_index = piece_index*64 + row*8 + column
-            moves = torch.zeros(1024, dtype=torch.float).to(self.device)
+            moves = torch.zeros(1024, dtype=torch.float)
             moves[move_index] = 1
         else:
             moves = None
@@ -407,8 +306,11 @@ class Agent:
             self.upgrade_type = None
 
 
-    def train(self):
+    def get_model_input_data(self, game_data):
         '''
+        A generator that returns the data to feed into the training model:
+        (state_last, state_new, moves_w, reward_w, done)
+
         White is the models playing color. Get whites move and blacks responding
         move. The start state will be before white makes its move and the end state
         is after black makes its move in response. This way the model may learn the 
@@ -417,72 +319,29 @@ class Agent:
         makes. It is not solely, for example, a pawn being at a new location because
         white moved it.
         '''
-        self.new_game()
-        state_last = None
-        data = self.get_action_from_data()
+        self.game_model.new_game()
+        data_gen = self.get_action_from_data(game_data)
 
         while True:
-            done = 0
 
-            #Get start state
-            if state_last is None:
-                state_last = self.get_state()
+            state_last = self.get_state()                                       #Get start state
+            moves_w, piece_w, row_w, column_w, reward_w, done = next(data_gen)  #Get white's move
+            if done == -1: break
+            self.send_move(piece_w, (row_w, column_w))                          #Perform white move
+            if done:
+                state_new = self.get_state()
+                yield state_last, state_new, moves_w, reward_w, done
+                break
 
-            #Get white's move
-            try:
-                moves_w, piece_w, row_w, column_w, reward_w, done_w = next(data)
-                self.training_state.move_count += 1
-            except StopIteration: break
-
-            #Handle bad data
-            if done_w == -1:
-                print(f"Bad data detected, skipping the rest of game {self.training_state.n_games}")
-                self.new_game()
-                state_last = None
-                continue
-
-            #Perform white move
-            self.send_move(piece_w, (row_w, column_w))
-        
-            #Get black's move
-            if not done_w:
-                try:
-                    if done_w != -1:
-                        moves_b, piece_b, row_b, column_b, reward_b, done_b = next(data)
-                except StopIteration: break
-
-            #Handle bad data
-            if done_b == -1:
-                print(f"Bad data detected, skipping the rest of game {self.training_state.n_games}")
-                self.new_game()
-                state_last = None
-                continue
-
-            #Perform black move
-            if not done_w:
-                self.send_move(piece_b, (row_b, column_b))
-
-            if done_w or done_b:
-                done = 1
+            moves_b, piece_b, row_b, column_b, reward_b, done = next(data_gen)  #Get black's move
+            if done == -1: break
+            self.send_move(piece_b, (row_b, column_b))                          #Perform black move
 
             #If black got a reward, that is bad for white, set whites reward to the negative of blacks reward
-            if not done and reward_b > 0:
+            if reward_b > 0:
                 reward_w = -reward_b
             
-            #Train step
             state_new = self.get_state()
-            self.training_state.game_loss += self.trainer.train_step(state_last, state_new, moves_w, reward_w, done)
-            state_last = state_new
+            yield state_last, state_new, moves_w, reward_w, done
 
-            if done:
-                self.new_game()
-                state_last = None
-
-
-class TrainController:
-
-    def __init__(self) -> None:
-        self.model = Model(self)
-
-    def update_lost_piece(*args):
-        pass
+            if done: break
