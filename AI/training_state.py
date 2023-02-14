@@ -9,8 +9,8 @@ class TrainingState:
         self.n_games = 0
         self.step_count = 0
         self.loss = 0
-        self.losses = []
-        self.x = []
+        self.losses = [0]
+        self.x = [0]
         plt.ion()
 
     

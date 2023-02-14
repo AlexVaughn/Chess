@@ -9,6 +9,7 @@ class TrainController:
     def __init__(self) -> None:
         self.data_file = "AI\\chess_moves.txt"
         self.batch_size = 1000
+        self.max_processes = 10#multiprocessing.cpu_count()
         self.training_agent = Agent(None, is_training=True)
         self.ts = TrainingState()
         self.fake_controller = FakeGameController()
@@ -24,7 +25,7 @@ class TrainController:
         '''
         self.ts.plot()
         line_gen = self.get_next_lines()
-        pool = multiprocessing.Pool()
+        pool = multiprocessing.Pool(self.max_processes)
         print(f"Device: {self.training_agent.trainer.device}")
         
         while True:

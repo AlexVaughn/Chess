@@ -33,7 +33,7 @@ class QTrainer:
     '''
     def __init__(self, model, is_training):
         self.model = model
-        self.lr = 0.00001
+        self.lr = 0.0001
         self.gamma = 0.9    #discount rate
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
