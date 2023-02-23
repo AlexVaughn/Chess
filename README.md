@@ -10,3 +10,19 @@ AI
 
 Files to run the program can be found here  
 https://drive.google.com/file/d/1TlKO6hYl-IxKF3AoWjNdOoGdiXhHGGl_/view?usp=share_link  
+  
+Required Python Modules  
+- tkinter  
+- torch  
+- multiprocessing  
+- matplotlib.pyplot  
+- IPython  
+- pickle  
+- PIL  
+- enum  
+- abc  
+- os  
+- sys  
+- socket  
+- time  
+- threading  
