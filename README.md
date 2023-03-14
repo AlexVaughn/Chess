@@ -27,6 +27,6 @@ Required Python Modules
 - time  
 - threading  
   
-How to Run:  
-Open the command prompt and run the command "python main.py"  
+How to Run  
+- Open the command prompt and run the command "python main.py"  
   
