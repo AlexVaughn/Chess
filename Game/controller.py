@@ -227,15 +227,6 @@ class Controller:
             self.pawn_to_upgrade = piece
             self.upgrade_pawn("Queen")
         self.pass_turn()
-        # state = self.agent.get_state()
-        # piece, row, column = self.agent.get_action_from_model(state)
-        # old_location = (piece.row, piece.column)
-        # new_location = self.agent.include_castling_if(piece, (row, column))
-        # self.perform_move(old_location, new_location)
-        # if self.model.check_pawn_end(piece):
-        #     self.pawn_to_upgrade = piece
-        #     self.upgrade_pawn("Queen")
-        # self.pass_turn()
 
 
     def set_lobby_both_connected(self):
