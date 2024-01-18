@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import copy
 from Game.constants import *
 
 class Model:
@@ -13,7 +14,38 @@ class Model:
         self.white_pieces = None
         self.turn = WHITE
 
-    
+    def copy(self) -> 'Model':
+        model = Model(None)
+        model.board = []
+        model.black_pieces = []
+        model.white_pieces = []
+
+        for row in self.board:
+            new_row = []
+            for piece in row:
+
+                if piece is None:
+                    new_row.append(None)
+                    continue
+
+                new_piece = piece.copy()
+                new_piece.model = model
+                new_row.append(new_piece)
+                # set king
+                if isinstance(new_piece, King):
+                    if new_piece.color == BLACK: model.black_king = new_piece
+                    else: model.white_king = new_piece
+                # add colors
+                if new_piece.color == BLACK: model.black_pieces.append(new_piece)
+                else: model.white_pieces.append(new_piece)
+
+            model.board.append(new_row)
+
+        model.pieces_lost = copy.deepcopy(self.pieces_lost)
+        model.turn = self.turn
+        return model
+
+
     def new_game(self):
         '''
         Start a new game. Update turn, board, pieces_lost.
@@ -22,7 +54,7 @@ class Model:
         self.black_king = King(self, BLACK, 0, 4)
         self.white_king = King(self, WHITE, 7, 4)
         self.board = [
-            [Rook(self, BLACK, 0, 0), Knight(self, BLACK, 0, 1), Bishop(self, BLACK, 0, 2), Queen(self, BLACK, 0, 3), 
+            [Rook(self, BLACK, 0, 0), Knight(self, BLACK, 0, 1), Bishop(self, BLACK, 0, 2), Queen(self, BLACK, 0, 3),
                 self.black_king, Bishop(self, BLACK, 0, 5), Knight(self, BLACK, 0, 6), Rook(self, BLACK, 0, 7)],
             [Pawn(self, BLACK, 1, i) for i in range(8)],
             [None]*8,
@@ -30,7 +62,7 @@ class Model:
             [None]*8,
             [None]*8,
             [Pawn(self, WHITE, 6, i) for i in range(8)],
-            [Rook(self, WHITE, 7, 0), Knight(self, WHITE, 7, 1), Bishop(self, WHITE, 7, 2), Queen(self, WHITE, 7, 3), 
+            [Rook(self, WHITE, 7, 0), Knight(self, WHITE, 7, 1), Bishop(self, WHITE, 7, 2), Queen(self, WHITE, 7, 3),
                 self.white_king, Bishop(self, WHITE, 7, 5), Knight(self, WHITE, 7, 6), Rook(self, WHITE, 7, 7)]
         ]
         self.pieces_lost = {
@@ -109,7 +141,7 @@ class Model:
                 other_piece.remove_from_color_list()
                 piece_name = type(other_piece).__name__ + "s"
                 self.pieces_lost[other_piece.color][piece_name] += 1
-                self.controller.update_lost_piece(other_piece.color, piece_name, 
+                self.controller.update_lost_piece(other_piece.color, piece_name,
                     self.pieces_lost[other_piece.color][piece_name])
 
             #Move piece
@@ -137,7 +169,7 @@ class Model:
         elif new_type == "Knight": new_piece = Knight(self, piece.color, piece.row, piece.column)
         elif new_type == "Bishop": new_piece = Bishop(self, piece.color, piece.row, piece.column)
         self.set_piece(new_piece, (piece.row, piece.column))
-        
+
         #change piece in color list
         color_list = self.black_pieces if piece.color == BLACK else self.white_pieces
         for i in range(len(color_list)):
@@ -163,7 +195,7 @@ class Model:
             for piece in pieces:
                 if piece and piece.color == self.turn:
                     moves += piece.get_locations()
-        
+
         #If the player can't move, it's either checkmate or stalemate
         if len(moves) == 0:
             if king.in_check(): self.controller.end_game("Checkmate")
@@ -178,6 +210,12 @@ class Piece(ABC):
         self.row = row
         self.column = column
         self.has_moved = False
+
+
+    def copy(self) -> 'Piece':
+        new_copy = type(self)(None, self.color, self.row, self.column)
+        new_copy.has_moved = self.has_moved
+        return new_copy
 
 
     def remove_from_color_list(self):
@@ -198,7 +236,7 @@ class Piece(ABC):
         '''
         pass
 
-    
+
     def in_board_range(self, location) -> bool:
         '''
         Receives a tuple of 2 ints (row, column), returns true if the location is in range of the board list.
@@ -210,7 +248,7 @@ class Piece(ABC):
         '''
         Receive a list of semi-tentative locations this piece could move to and construct the true
         tentative list. Basically casts a ray in a direction, adds locations to the list until
-        it hits another object. Allows the first tile hit belonging to the opposite color to be a 
+        it hits another object. Allows the first tile hit belonging to the opposite color to be a
         moveable location. While not allowing the first tile hit that belongs to this pieces color to
         be a moveable location. This makes it easy to calculate the allowed locations for pieces that
         work in a line-of-sight (queen, rook, bishop).
@@ -226,7 +264,7 @@ class Piece(ABC):
                 tentative.append(i)
         return tentative
 
-    
+
     def get_locations(self, tentative=None, first_call=True, castling=False) -> list:
         '''
         Search a list of tentative locations this piece can move to. Compile and return a new list
@@ -242,7 +280,7 @@ class Piece(ABC):
             if first_call and (loc == (self.model.black_king.row, self.model.black_king.column)
             or loc == (self.model.white_king.row, self.model.white_king.column)):
                 continue
-            
+
             #Save state
             original_loc = (self.row, self.column)
             org_piece = self.model.get_piece(loc)
@@ -250,20 +288,20 @@ class Piece(ABC):
             #Simulate move
             self.model.set_piece(None, (self.row, self.column))
             self.model.set_piece(self, loc)
-            
+
             #Check if king is in check
             king = self.model.black_king if self.color == BLACK else self.model.white_king
             if first_call:
                 if not king.in_check(): locations.append(loc)
             else: locations.append(loc)
-            
+
             #Restore state
             self.model.set_piece(org_piece, loc)
             self.model.set_piece(self, original_loc)
 
         if not castling and first_call and ((isinstance(self, King) or isinstance(self, Rook))):
             locations += self.get_castling_locations()
-        
+
         return locations
 
 
@@ -289,14 +327,14 @@ class Piece(ABC):
         rook = self.model.get_piece((king.row, king.column-4))
         if self is rook or isinstance(self, King):
             if isinstance(rook, Rook) and not rook.has_moved:
-                
-                path_locations = [(king.row, king.column-i-1) for i in range(3) 
+
+                path_locations = [(king.row, king.column-i-1) for i in range(3)
                     if not self.model.get_piece((king.row, king.column-i-1))]
-                
+
                 if len(path_locations) == 3:
 
                     if len(king.get_locations(path_locations, castling=True)) == 3:
-                        
+
                         if isinstance(self, King):
                             castling_locations.append((rook.row, rook.column, -2))
                         else:
@@ -306,21 +344,21 @@ class Piece(ABC):
         rook = self.model.get_piece((king.row, king.column+3))
         if self is rook or isinstance(self, King):
             if isinstance(rook, Rook) and not rook.has_moved:
-                
-                path_locations = [(king.row, king.column+i+1) for i in range(2) 
+
+                path_locations = [(king.row, king.column+i+1) for i in range(2)
                     if not self.model.get_piece((king.row, king.column+i+1))]
-                    
+
                 if len(path_locations) == 2:
 
                     if len(king.get_locations(path_locations, castling=True)) == 2:
-                        
+
                         if isinstance(self, King):
                             castling_locations.append((rook.row, rook.column, 2))
                         else:
                             castling_locations.append((king.row, king.column, 2))
 
         return castling_locations
-        
+
 
 class Pawn(Piece):
 

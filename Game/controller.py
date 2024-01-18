@@ -2,26 +2,26 @@ from Game.model import Model
 from Game.constants import *
 from Game.timer import Timer
 from Game.network import *
-from AI.agent import Agent
+from Game.agent import *
 
 class Controller:
 
     def __init__(self, app):
         self.view = app
         self.model = Model(self)
+        self.agent = ExpectimaxAgent(2)
         self.game_type = GameType(GameType.NONE.value)
-        self.agent = Agent(self.model)
         self.time_limit = 93  #Add 3 seconds to desired seconds to account for a timer buffer
-        self.timer = Timer(1, self.time_limit, func=self.view.update_timer, func_args=(WHITE,), 
+        self.timer = Timer(1, self.time_limit, func=self.view.update_timer, func_args=(WHITE,),
             final_func=self.end_game, final_args=("Timer",))
-        self.player_color = BLACK
+        self.player_color = WHITE
         self.selected_locations = []
         self.piece_selected = None
         self.pawn_to_upgrade = None
         self.online_player = None
         self.win_con = None
         self.win_color = None
-        
+
 
     def new_game(self):
         '''
@@ -37,7 +37,7 @@ class Controller:
 
         if self.online_player:
             self.game_type = GameType.NETWORK.value
-            
+
             if isinstance(self.online_player.host, Server):
                 self.timer.resume()
                 self.send_ins(NetworkIns.NEW_GAME.value)
@@ -70,7 +70,7 @@ class Controller:
         if not self.view.popup_quit:
             self.timer.reset(new_args=(self.model.turn, ))
             self.timer.resume()
-        
+
         if (self.game_type == GameType.AI.value
         and self.model.turn != self.player_color):
             self.agent_move()
@@ -149,13 +149,13 @@ class Controller:
         '''
         piece = self.model.get_piece(old_location)
         self.model.move_piece(piece, new_location)
-        
+
         #Castling
         if len(new_location) == 3:
             for loc in [(piece.row, i) for i in range(0, 8)]:
                 p = self.model.get_piece(loc)
                 self.view.update_tile(loc, *self.get_image(p))
-        
+
         #Normal Move
         else:
             self.view.update_tile(old_location, None, None)
@@ -184,7 +184,7 @@ class Controller:
         Called by model, timer, and controller, when a player has won the game.
         '''
         self.timer.pause()
-        if (self.online_player and isinstance(self.online_player.host, Server) and 
+        if (self.online_player and isinstance(self.online_player.host, Server) and
         self.online_player.receiving_instruction and win_con == "Timer"):
             return
 
@@ -193,10 +193,10 @@ class Controller:
             self.win_color = override_winner
         else:
             self.win_color = WHITE if self.model.turn == BLACK else BLACK
-        
+
         if self.online_player and self.online_player.host and win_con == "Timer":
             self.send_ins(NetworkIns.DECLARE_WINNER.value)
-        
+
         self.view.show_winner(self.win_color, self.win_con)
 
 
@@ -210,17 +210,32 @@ class Controller:
 
     def agent_move(self):
         '''
-        Gets the move from the AI and performs the move
+        Gets the move from the AI on a seperate thread. Performs the move once
+        it has been calculated.
         '''
-        state = self.agent.get_state()
-        piece, row, column = self.agent.get_action_from_model(state)
-        old_location = (piece.row, piece.column)
-        new_location = self.agent.include_castling_if(piece, (row, column))
+        if self.agent.thread is not None: self.agent.thread.join()
+        self.agent.get_action(self.model.copy(), self.agent_do_move)
+
+
+    def agent_do_move(self, old_location, new_location):
+        '''
+        Called by self.agent when the best move has been calculated.
+        '''
+        piece = self.model.get_piece(old_location)
         self.perform_move(old_location, new_location)
         if self.model.check_pawn_end(piece):
             self.pawn_to_upgrade = piece
             self.upgrade_pawn("Queen")
         self.pass_turn()
+        # state = self.agent.get_state()
+        # piece, row, column = self.agent.get_action_from_model(state)
+        # old_location = (piece.row, piece.column)
+        # new_location = self.agent.include_castling_if(piece, (row, column))
+        # self.perform_move(old_location, new_location)
+        # if self.model.check_pawn_end(piece):
+        #     self.pawn_to_upgrade = piece
+        #     self.upgrade_pawn("Queen")
+        # self.pass_turn()
 
 
     def set_lobby_both_connected(self):
@@ -236,7 +251,7 @@ class Controller:
     def play_again(self):
         '''
         Called when the play again button is pressed in the popup postgame
-        '''           
+        '''
         if self.online_player:
 
             if not self.online_player.host.socket_live:
@@ -359,13 +374,13 @@ class Controller:
         Packages information and sends to other host
         '''
         if self.game_type == GameType.NETWORK.value:
-            
+
             if value == NetworkIns.NEW_GAME.value:
                 self.online_player.send_as_bytes(value, self.timer.get_current_interval())
 
             elif value == NetworkIns.UPDATE_TIMER.value:
                 self.online_player.send_as_bytes(value, self.timer.get_current_interval())
-        
+
             elif value == NetworkIns.MOVE_PIECE.value:
                 self.online_player.send_as_bytes(value, self.timer.get_current_interval(), *args)
 
@@ -409,12 +424,12 @@ class Controller:
 
         #Server repeatedly says to client, "I'm in new lobby, are you in lobby?" until client in lobby or disconnects
         elif data[0] == NetworkIns.REJOINED_LOBBY.value:
-            
+
             if isinstance(self.online_player.host, Client):
                 in_lobby = 1 if self.view.active_frame == ActiveFrame.LOBBY.value else 0
                 self.send_ins(NetworkIns.REJOINED_LOBBY.value, in_lobby)
                 self.set_lobby_both_connected()
-            
+
             elif isinstance(self.online_player.host, Server):
                 if data[1] == 0:
                     self.send_ins(NetworkIns.REJOINED_LOBBY.value)
